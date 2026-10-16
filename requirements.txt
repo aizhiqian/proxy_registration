@@ -1,6 +1,4 @@
 quart
-camoufox[geoip]
-patchright
 rich
 curl_cffi
 requests

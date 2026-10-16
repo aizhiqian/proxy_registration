@@ -710,41 +710,48 @@ def poll_verification_code(
     access_token: str | None = None,
     max_rounds: int = 45,
 ):
-    """
-    Poll temp inbox for ProxyScrape verification code.
+    """轮询临时邮箱；首次发信后两分钟仍未获得验证码时补发一次。"""
+    resend_due_at = time.monotonic() + 120
+    resend_once = False
 
-    After register, immediately request a code send (resend endpoint), then poll.
-    If still empty after ~20s, resend once more (respect 2-minute site limit).
-    """
     if session is not None and access_token:
         print(f"[*] {email} 请求发送邮箱验证码 (reset-verification-code)...")
         rr = resend_verification_code(session, access_token)
         print(f"[*] {email} 发信结果 ({rr['status']}): {rr['message']}")
+        resend_due_at = time.monotonic() + 120
 
     last_raw_len = 0
     for attempt in range(max_rounds):
         if stop_flag:
             return None
-        time.sleep(2 if attempt else 1)
+
+        time.sleep(5)
 
         content = fetch_inbox_content(email_service, jwt, email, email_service_type)
         if content:
             if len(content) != last_raw_len:
                 last_raw_len = len(content)
                 print(f"[*] {email} 收到邮件 (len={len(content)})，解析验证码...")
+
             code = parse_verification_code(content)
             if code:
                 return code
+
             if attempt in (0, 5, 15, 30):
                 snippet = re.sub(r"\s+", " ", content)[:180]
                 print(f"[!] {email} 邮件未能解析验证码，snippet: {snippet!r}")
-        else:
-            if attempt % 5 == 0:
-                print(f"[*] {email} 等待验证邮件... ({attempt + 1}/{max_rounds})")
+        elif attempt % 5 == 0:
+            print(f"[*] {email} 等待验证邮件... ({attempt + 1}/{max_rounds})")
 
-        # Retry resend around attempt 12 if still no parseable code
-        if attempt == 12 and session is not None and access_token:
-            print(f"[*] {email} 仍未解析到验证码，再次请求发信...")
+        # 首次发信满两分钟仍未获得验证码时，仅补发一次
+        if (
+            not resend_once
+            and time.monotonic() >= resend_due_at
+            and session is not None
+            and access_token
+        ):
+            resend_once = True
+            print(f"[*] {email} 两分钟仍未解析到验证码，再次请求发信...")
             rr = resend_verification_code(session, access_token)
             print(f"[*] {email} 再次发信 ({rr['status']}): {rr['message']}")
 
